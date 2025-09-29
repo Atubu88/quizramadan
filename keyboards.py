@@ -1,14 +1,20 @@
+import asyncio
+import logging
+import os
+from typing import Optional
+
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-import asyncio
-import os
+from postgrest.exceptions import APIError
 from supabase import create_client
-from typing import Optional
 
 # Инициализируем клиента Supabase (убедитесь, что переменные окружения настроены)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_API_KEY)
+
+
+logger = logging.getLogger(__name__)
 
 
 def start_keyboard():
@@ -28,15 +34,23 @@ async def quiz_category_keyboard():
     """Клавиатура с категориями викторин."""
 
     def fetch_categories():
-        return supabase.table("categories").select("id, title").execute()
+        try:
+            return supabase.table("categories").select("id, title").execute()
+        except APIError:
+            logger.warning(
+                "Не удалось получить колонку 'title' для категорий, пробуем 'name'",
+                exc_info=True,
+            )
+            return supabase.table("categories").select("id, name").execute()
 
     response = await asyncio.to_thread(fetch_categories)
     categories = response.data or []
 
     keyboard_builder = InlineKeyboardBuilder()
     for category in categories:
+        title = category.get("title") or category.get("name") or f"Категория {category['id']}"
         keyboard_builder.button(
-            text=category["title"],
+            text=title,
             callback_data=f"category_{category['id']}"
         )
 
