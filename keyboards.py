@@ -1,8 +1,9 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncio
 import os
 from supabase import create_client
+from typing import Optional
 
 # Инициализируем клиента Supabase (убедитесь, что переменные окружения настроены)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -23,11 +24,41 @@ def start_keyboard():
     return keyboard
 
 
-async def quiz_list_keyboard():
-    # Выполняем запрос к Supabase для получения списка викторин
-    response = await asyncio.to_thread(
-        supabase.table("quizzes").select("id, title").execute
-    )
+async def quiz_category_keyboard():
+    """Клавиатура с категориями викторин."""
+
+    def fetch_categories():
+        return supabase.table("categories").select("id, title").execute()
+
+    response = await asyncio.to_thread(fetch_categories)
+    categories = response.data or []
+
+    keyboard_builder = InlineKeyboardBuilder()
+    for category in categories:
+        keyboard_builder.button(
+            text=category["title"],
+            callback_data=f"category_{category['id']}"
+        )
+
+    if categories:
+        keyboard_builder.adjust(1)
+
+    return keyboard_builder.as_markup()
+
+
+async def quiz_list_keyboard(category_id: Optional[int] = None):
+    """Клавиатура со списком викторин. Может фильтровать по категории.
+
+    Возвращает кортеж из клавиатуры и признака наличия викторин.
+    """
+
+    def fetch_quizzes():
+        query = supabase.table("quizzes").select("id, title")
+        if category_id is not None:
+            query = query.eq("category_id", category_id)
+        return query.execute()
+
+    response = await asyncio.to_thread(fetch_quizzes)
     quizzes = response.data or []
 
     keyboard_builder = InlineKeyboardBuilder()
@@ -36,5 +67,13 @@ async def quiz_list_keyboard():
             text=quiz["title"],
             callback_data=f"quiz_{quiz['id']}"
         )
-    keyboard_builder.adjust(1)  # Одна кнопка в ряду
-    return keyboard_builder.as_markup()
+
+    if quizzes:
+        keyboard_builder.adjust(1)
+
+    if category_id is not None:
+        keyboard_builder.row(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories")
+        )
+
+    return keyboard_builder.as_markup(), bool(quizzes)
