@@ -35,20 +35,20 @@ async def quiz_category_keyboard():
 
     def fetch_categories():
         try:
-            return supabase.table("categories").select("id, title").execute()
+            return supabase.table("categories").select("id, name").execute()
         except APIError:
             logger.warning(
-                "Не удалось получить колонку 'title' для категорий, пробуем 'name'",
+                "Не удалось получить колонку 'name' для категорий, пробуем 'title'",
                 exc_info=True,
             )
-            return supabase.table("categories").select("id, name").execute()
+            return supabase.table("categories").select("id, title").execute()
 
     response = await asyncio.to_thread(fetch_categories)
     categories = response.data or []
 
     keyboard_builder = InlineKeyboardBuilder()
     for category in categories:
-        title = category.get("title") or category.get("name") or f"Категория {category['id']}"
+        title = category.get("name") or category.get("title") or f"Категория {category['id']}"
         keyboard_builder.button(
             text=title,
             callback_data=f"category_{category['id']}"
