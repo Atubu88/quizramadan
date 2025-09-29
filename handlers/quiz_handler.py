@@ -7,12 +7,11 @@ from aiogram import Router, types, Bot, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramAPIError
 from supabase import create_client
 from dotenv import load_dotenv
 
-from keyboards import quiz_list_keyboard
+from keyboards import quiz_list_keyboard, quiz_category_keyboard
 from utils import build_leaderboard_message
 
 load_dotenv()
@@ -27,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class QuizState(StatesGroup):
+    waiting_for_category_selection = State()
     waiting_for_quiz_selection = State()
     answering_questions = State()
 
@@ -118,12 +118,78 @@ async def start_quiz(callback_query: types.CallbackQuery, state: FSMContext):
 async def list_quizzes(message: types.Message, state: FSMContext):
     """Отправляем список викторин пользователю."""
     try:
-        keyboard = await quiz_list_keyboard()
-        await message.answer("Выберите викторину:", reply_markup=keyboard)
-        await state.set_state(QuizState.waiting_for_quiz_selection)
+        keyboard = await quiz_category_keyboard()
+        await message.answer("Выберите категорию:", reply_markup=keyboard)
+        await state.set_state(QuizState.waiting_for_category_selection)
     except Exception as e:
         logging.error(f"Ошибка в list_quizzes: {e}")
         await message.answer("⚠️ Ошибка загрузки списка викторин.")
+
+
+@quiz_router.callback_query(
+    F.data.startswith("category_"),
+    StateFilter(QuizState.waiting_for_category_selection)
+)
+async def list_quizzes_by_category(callback_query: types.CallbackQuery, state: FSMContext):
+    """Отправляем список викторин выбранной категории."""
+    try:
+        await callback_query.answer()
+
+        try:
+            category_id = int(callback_query.data.split("_")[1])
+        except (IndexError, ValueError):
+            message = callback_query.message
+            if message:
+                await message.answer("⚠️ Неверная категория.")
+            else:
+                await callback_query.bot.send_message(
+                    callback_query.from_user.id,
+                    "⚠️ Неверная категория."
+                )
+            return
+
+        keyboard, has_quizzes = await quiz_list_keyboard(category_id)
+
+        text = "Выберите викторину:" if has_quizzes else "⚠️ В этой категории пока нет викторин."
+
+        message = callback_query.message
+        if message:
+            await message.edit_text(text, reply_markup=keyboard)
+        else:
+            await callback_query.bot.send_message(
+                callback_query.from_user.id,
+                text,
+                reply_markup=keyboard
+            )
+
+        await state.set_state(QuizState.waiting_for_quiz_selection)
+    except Exception as e:
+        logger.exception(f"Ошибка в list_quizzes_by_category: {e}")
+        await callback_query.message.answer("⚠️ Не удалось загрузить викторины категории.")
+
+
+@quiz_router.callback_query(
+    F.data == "back_to_categories",
+    StateFilter(QuizState.waiting_for_quiz_selection)
+)
+async def back_to_categories(callback_query: types.CallbackQuery, state: FSMContext):
+    """Возврат к списку категорий."""
+    try:
+        await callback_query.answer()
+        keyboard = await quiz_category_keyboard()
+        message = callback_query.message
+        if message:
+            await message.edit_text("Выберите категорию:", reply_markup=keyboard)
+        else:
+            await callback_query.bot.send_message(
+                callback_query.from_user.id,
+                "Выберите категорию:",
+                reply_markup=keyboard
+            )
+        await state.set_state(QuizState.waiting_for_category_selection)
+    except Exception as e:
+        logger.exception(f"Ошибка в back_to_categories: {e}")
+        await callback_query.message.answer("⚠️ Не удалось загрузить категории.")
 
 
 async def send_question(chat_id: int, state: FSMContext, bot: Bot):
